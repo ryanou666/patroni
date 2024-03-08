@@ -1219,6 +1219,7 @@ class Ha(object):
     def _run_cycle(self):
         dcs_failed = False
         try:
+            # state_handler 为 Postgresql 类，记录状态信息，这里重置所有状态信息为空
             self.state_handler.reset_cluster_info_state()
             self.load_cluster_from_dcs()
 

@@ -285,6 +285,7 @@ class Postgresql(object):
             replica_methods = self.create_replica_methods
         return any(self.replica_method_can_work_without_replication_connection(m) for m in replica_methods)
 
+    # 重置集群的状态信息
     def reset_cluster_info_state(self):
         self._cluster_info_state = {}
 

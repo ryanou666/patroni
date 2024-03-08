@@ -33,7 +33,49 @@ def check_auth(func):
             return func(handler, *args, **kwargs)
     return wrapper
 
-
+# 在HTTPServer中可以实现简单的路由功能，将不同的URL映射到相应的后端处理函数上。当然，对于更复杂的路由需求和功能，一般会选择使用现有的Web框架（如Flask、Django等）来实现更灵活和强大的路由映射机制。
+# from http.server import BaseHTTPRequestHandler, HTTPServer
+#
+# 自定义请求处理程序，继承自BaseHTTPRequestHandler
+# class MyRequestHandler(BaseHTTPRequestHandler):
+#     
+#     def do_GET(self):
+#         if self.path == '/hello':
+#             self.handle_hello()
+#         elif self.path == '/bye':
+#             self.handle_bye()
+#         else:
+#             self.send_response(404)
+#             self.end_headers()
+#             self.wfile.write(b'Not Found')
+#     
+#     def handle_hello(self):
+#         self.send_response(200)
+#         self.end_headers()
+#         self.wfile.write(b'Hello, World!')
+# 
+#     def handle_bye(self):
+#         self.send_response(200)
+#         self.end_headers()
+#         self.wfile.write(b'Goodbye!')
+# 
+# # 创建HTTPServer实例，并指定请求处理程序为MyRequestHandler
+# server_address = ('', 8000)  # 绑定到本地所有接口的8000端口
+# httpd = HTTPServer(server_address, MyRequestHandler)
+# 
+# # 启动HTTPServer，等待请求
+# print('Starting server on port 8000...')
+# httpd.serve_forever()
+# 
+# 在这个示例中，我们定义了一个自定义的请求处理程序MyRequestHandler，它继承自BaseHTTPRequestHandler。在do_GET方法中，根据请求的路径（self.path）来决定调用哪个后端处理函数来处理请求。
+# 
+# 当收到GET请求时，如果路径为/hello，则调用handle_hello方法返回"Hello, World!"；如果路径为/bye，则调用handle_bye方法返回"Goodbye!"；否则返回404 Not Found。
+# 
+# 要访问上面示例中创建的HTTPServer实例，可以通过Web浏览器或使用curl命令（在命令行中）来发送HTTP请求
+#   curl http://localhost:8000/hello
+#   curl http://localhost:8000/bye
+#
+# 这里使用了同样的方法进行进行路由
 class RestApiHandler(BaseHTTPRequestHandler):
 
     def _write_response(self, status_code, body, content_type='text/html', headers=None):
@@ -84,6 +126,7 @@ class RestApiHandler(BaseHTTPRequestHandler):
                 response['logger_records_lost'] = lost
         self._write_json_response(status_code, response)
 
+    # 用于处理所有无法路由到其他方法的 GET 请求的默认方法
     def do_GET(self, write_status_code_only=False):
         """Default method for processing all GET requests which can not be routed to other methods"""
 

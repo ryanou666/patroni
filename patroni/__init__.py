@@ -19,10 +19,14 @@ class Patroni(object):
         from patroni.version import __version__
         from patroni.watchdog import Watchdog
 
+        # 注册信号处理函数
         self.setup_signal_handlers()
 
+        # 保存 patroni 版本 1.6.0
         self.version = __version__
+        # 日志模块
         self.logger = PatroniLogger()
+        # 配置模块
         self.config = Config()
         self.logger.reload_config(self.config.get('log', {}))
         self.dcs = get_dcs(self.config)
@@ -30,6 +34,7 @@ class Patroni(object):
         self.load_dynamic_configuration()
 
         self.postgresql = Postgresql(self.config['postgresql'])
+        # rest api 模块
         self.api = RestApiServer(self, self.config['restapi'])
         self.ha = Ha(self)
 

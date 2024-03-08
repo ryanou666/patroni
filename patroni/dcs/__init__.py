@@ -56,37 +56,73 @@ def parse_connection_string(value):
     return conn_url, api_url
 
 
+# 该函数返回 dcs目录下的可用DCS模块：patroni.dcs.consul patroni.dcs.etcd patroni.dcs.exhibitor patroni.dcs.kubernetes patroni.dcs.zookeeper
 def dcs_modules():
     """Get names of DCS modules, depending on execution environment. If being packaged with PyInstaller,
     modules aren't discoverable dynamically by scanning source directory because `FrozenImporter` doesn't
     implement `iter_modules` method. But it is still possible to find all potential DCS modules by
     iterating through `toc`, which contains list of all "frozen" resources."""
 
+    # 根据执行环境获取 DCS 模块的名称。 
+    # 如果使用 PyInstaller 打包，则无法通过扫描源目录动态发现模块，因为“FrozenImporter”没有实现“iter_modules”方法。 
+    # 但仍然可以通过迭代 `toc` 来找到所有潜在的 DCS 模块，其中包含所有“冻结”资源的列表。
+
+    # 在Python 3中，__package__和__file__是两个特殊的内置变量，用于帮助管理模块和包的导入和加载过程。
+    # 
+    # __package__: 这个变量指示当前模块所属的包的名称。如果一个模块是被直接执行的（而不是作为一个包的一部分被导入），那么__package__会被设置为None。如果一个模块是作为一个包的一部分被导入的，__package__会被设置为该包的名称。
+    # 
+    # __file__: 这个变量包含当前模块的文件路径。对于直接执行的脚本，__file__会被设置为脚本的绝对路径；对于被导入的模块，__file__会被设置为模块的源文件路径。
+    # 
+    # 下面是一个简单的示例来演示这两个变量的使用：
+    # 
+    # 假设有一个包结构如下：
+    # 
+    # my_package/
+    #     __init__.py
+    #     module.py
+    # 在module.py中可以使用__package__和__file__变量来获取当前模块所属的包名和文件路径：
+    # 
+    # python
+    # print(__package__)  # 输出: my_package
+    # print(__file__)     # 输出: /path/to/my_package/module.py
     dcs_dirname = os.path.dirname(__file__)
     module_prefix = __package__ + '.'
 
+    # getattr(sys, 'frozen', False) 会检查sys模块中是否存在名为'frozen'的属性，如果存在则返回该属性的值，否则返回False。
+    # 如果Python解释器处于“冻结”状态（通常意味着它是通过打包工具打包成可执行文件），则使用pkgutil.get_importer(dcs_dirname)来获取导入器，然后遍历其中的模块。
+    # 如果Python解释器未处于“冻结”状态，即在开发环境中，则直接使用pkgutil.iter_modules([dcs_dirname])来遍历指定目录下的模块。
     if getattr(sys, 'frozen', False):
         importer = pkgutil.get_importer(dcs_dirname)
         return [module for module in list(importer.toc) if module.startswith(module_prefix) and module.count('.') == 2]
     else:
+        # 未冻结状态
+        #   pkgutil.iter_modules()函数返回一个迭代器，用于遍历指定路径下的模块信息。每次迭代返回一个元组，包含三个元素：
+        #       模块加载器（Module Loader）：这个元素表示模块的加载器，可以用于加载和执行模块。
+        #       模块名称（Module Name）：这个元素表示模块的名称，即模块文件的名称（不包括扩展名）。
+        #       是否为包（Is Package）：这个元素是一个布尔值，表示该模块是否为一个包。
         return [module_prefix + name for _, name, is_pkg in pkgutil.iter_modules([dcs_dirname]) if not is_pkg]
 
 
 def get_dcs(config):
     available_implementations = set()
+    # 遍历dcs目录下的可用DCS模块：patroni.dcs.consul patroni.dcs.etcd patroni.dcs.exhibitor patroni.dcs.kubernetes patroni.dcs.zookeeper
     for module_name in dcs_modules():
         try:
+            # 用于动态导入一个模块。在 Python 中，通常我们可以使用 import 关键字来导入一个模块，比如 import math。但有时候我们希望在程序运行时根据某些条件动态地导入一个模块，这时就可以使用 importlib.import_module
             module = importlib.import_module(module_name)
             for name in filter(lambda name: not name.startswith('__'), dir(module)):  # iterate through module content
                 item = getattr(module, name)
                 name = name.lower()
                 # try to find implementation of AbstractDCS interface, class name must match with module_name
+                # 尝试找到 AbstractDCS 接口的实现，类名必须与 module_name 匹配
                 if inspect.isclass(item) and issubclass(item, AbstractDCS) and __package__ + '.' + name == module_name:
                     available_implementations.add(name)
                     if name in config:  # which has configuration section in the config file
                         # propagate some parameters
+                        # 传播一些参数 给DCS
                         config[name].update({p: config[p] for p in ('namespace', 'name', 'scope', 'loop_wait',
                                              'patronictl', 'ttl', 'retry_timeout') if p in config})
+                        # 实例化
                         return item(config[name])
         except ImportError:
             if not config.get('patronictl'):

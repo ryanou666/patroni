@@ -306,6 +306,7 @@ class Client(etcd.Client):
             self._machines_cache.remove(self._base_uri)
 
 
+# get_dcs 获得的类实例，处理和ETCD的交互
 class Etcd(AbstractDCS):
 
     def __init__(self, config):
