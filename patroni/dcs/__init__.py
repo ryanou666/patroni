@@ -572,6 +572,7 @@ class AbstractDCS(object):
             i.e.: `zookeeper` for zookeeper, `etcd` for etcd, etc...
         """
         self._name = config['name']
+        # 在DCS中保存的基本路径是 /${namespace, 默认是service}/${scope}，两层目录
         self._base_path = re.sub('/+', '/', '/'.join(['', config.get('namespace', 'service'), config['scope']]))
         self._set_loop_wait(config.get('loop_wait', 10))
 

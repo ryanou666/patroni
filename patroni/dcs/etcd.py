@@ -321,6 +321,7 @@ class Etcd(AbstractDCS):
         self._has_failed = False
 
     def retry(self, *args, **kwargs):
+        # 返回了一个当前类的一个拷贝，就是安装原有的配置重新初始化了一个 Retry 类
         return self._retry.copy()(*args, **kwargs)
 
     def _handle_exception(self, e, name='', do_sleep=False, raise_ex=None):
@@ -424,6 +425,7 @@ class Etcd(AbstractDCS):
         client = None
         while not client:
             try:
+                # 返回一个ETCD的客户端
                 client = Client(config, dns_resolver)
                 if 'use_proxies' in config and not client.machines:
                     raise etcd.EtcdException
@@ -450,9 +452,12 @@ class Etcd(AbstractDCS):
     def member(node):
         return Member.from_node(node.modifiedIndex, os.path.basename(node.key), node.ttl, node.value)
 
+    # 获取在ETCD集群中保存的状态
     def _load_cluster(self):
         cluster = None
         try:
+            # self.retry(）： 将会用一个新的 Retry 类来调用（参数列表同样） 
+            # 递归读DCS中的目录：/${namespace, 默认是service}/${scope}
             result = self.retry(self._client.read, self.client_path(''), recursive=True)
             nodes = {node.key[len(result.key):].lstrip('/'): node for node in result.leaves}
 

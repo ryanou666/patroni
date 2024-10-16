@@ -291,6 +291,7 @@ class Bootstrap(object):
             self._post_restore()
         return ret
 
+    # 从头初始化一个新节点并启动它。
     def bootstrap(self, config):
         """ Initialize a new node from scratch and start it. """
         pg_hba = config.get('pg_hba', [])

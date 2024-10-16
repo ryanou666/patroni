@@ -290,12 +290,15 @@ class Retry(object):
         self._cur_delay = self.delay
         self._cur_stoptime = None
 
+    # 返回了一个当前类的一个拷贝，就是安装原有的配置重新初始化了一个 Retry 类
     def copy(self):
         """Return a clone of this retry manager"""
         return Retry(max_tries=self.max_tries, delay=self.delay, backoff=self.backoff,
                      max_jitter=self.max_jitter / 100.0, max_delay=self.max_delay, sleep_func=self.sleep_func,
                      deadline=self.deadline, retry_exceptions=self.retry_exceptions)
 
+    # 此类是个可调用对象
+    #   用于重复执行 func(*args, **kwargs)
     def __call__(self, func, *args, **kwargs):
         """Call a function with arguments until it completes without throwing a `retry_exceptions`
 

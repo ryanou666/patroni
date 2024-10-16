@@ -60,10 +60,10 @@ class Ha(object):
 
     def __init__(self, patroni):
         self.patroni = patroni
-        self.state_handler = patroni.postgresql
+        self.state_handler = patroni.postgresql # 状态处理器实际上是 Postgresql(self.config['postgresql'])
         self._rewind = Rewind(self.state_handler)
         self.dcs = patroni.dcs
-        self.cluster = None
+        self.cluster = None # Cluster 类
         self.old_cluster = None
         self._is_leader = False
         self._is_leader_lock = RLock()
@@ -157,6 +157,7 @@ class Ha(object):
             self.watchdog.keepalive()
         return ret
 
+    # 如果当前有节点有leader锁则返回真
     def has_lock(self, info=True):
         lock_owner = self.cluster.leader and self.cluster.leader.name
         if info:
@@ -174,21 +175,21 @@ class Ha(object):
     def touch_member(self):
         with self._member_state_lock:
             data = {
-                'conn_url': self.state_handler.connection_string,
-                'api_url': self.patroni.api.connection_string,
-                'state': self.state_handler.state,
-                'role': self.state_handler.role,
-                'version': self.patroni.version
+                'conn_url': self.state_handler.connection_string,   # 连接本地数据库库的URL
+                'api_url': self.patroni.api.connection_string,  # 连接对端http server的URL，可能有多条？
+                'state': self.state_handler.state,  # 当前数据库的状态
+                'role': self.state_handler.role,    # 当前数据库角色
+                'version': self.patroni.version     # patroni版本信息
             }
 
             # following two lines are mainly necessary for consul, to avoid creation of master service
             if data['role'] == 'master' and not self.is_leader():
                 data['role'] = 'promoted'
             if self.is_leader() and not self._rewind.checkpoint_after_promote():
-                data['checkpoint_after_promote'] = False
+                data['checkpoint_after_promote'] = False # 提升后有没有做checkpoint
             tags = self.get_effective_tags()
             if tags:
-                data['tags'] = tags
+                data['tags'] = tags # patroni的tags参数
             if self.state_handler.pending_restart:
                 data['pending_restart'] = True
             if self._async_executor.scheduled_action in (None, 'promote') \
@@ -1216,11 +1217,14 @@ class Ha(object):
         Must be called when async_executor is busy or in the main thread."""
         self._start_timeout = value
 
+    # 主循环
     def _run_cycle(self):
         dcs_failed = False
         try:
-            # state_handler 为 Postgresql 类，记录状态信息，这里重置所有状态信息为空
+            # state_handler 为 Postgresql 类，记录状态信息，这里重置所有状态信息为 _cluster_info_state={}
+            # 重置集群的状态信息 -- > 仅有两个信息 timeline wal_position
             self.state_handler.reset_cluster_info_state()
+            # 重新获取DCS中的所有数据到 self.cluster
             self.load_cluster_from_dcs()
 
             if self.is_paused():
@@ -1231,6 +1235,7 @@ class Ha(object):
                     self.state_handler.schedule_sanity_checks_after_pause()
                 self._was_paused = False
 
+            # 如果当前节点没有在DCS中保存，则保存当前这个节点的信息到DCS
             if not self.cluster.has_member(self.state_handler.name):
                 self.touch_member()
 
@@ -1261,17 +1266,24 @@ class Ha(object):
                     return msg
 
             # is data directory empty?
+            # 数据库数据目录不存在 或者 目录下没有任何东西 则返回真
             if self.state_handler.data_directory_empty():
+                # 先设置数据库的状态为 'uninitialized'
                 self.state_handler.set_role('uninitialized')
+                # 这里先尝试停库
+                #   停止数据库，数据库状态只有两个结果 'stopped' 'stop failed'
                 self.state_handler.stop('immediate')
                 # In case datadir went away while we were master.
+                # 关闭看门狗
                 self.watchdog.disable()
 
                 # is this instance the leader?
+                # 如果当前节点持有leader key, 则先释放 leader key
                 if self.has_lock():
                     self.release_leader_key_voluntarily()
                     return 'released leader key voluntarily as data dir empty and currently leader'
 
+                # 启动一个新的节点 -- 设置数据库状态为 'startting', 拉起数据库并且等待数据库的状态变为其他状态才能够返回（可以是 'start failed' 或者是 'running'）
                 return self.bootstrap()  # new node
             # "bootstrap", but data directory is not empty
             elif not self.sysid_valid(self.cluster.initialize) and self.cluster.is_unlocked() and not self.is_paused():

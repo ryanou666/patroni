@@ -71,6 +71,7 @@ class Postgresql(object):
         self.config = ConfigHandler(self, config)
 
         self._bin_dir = config.get('bin_dir') or ''
+        # 用于启动数据库
         self.bootstrap = Bootstrap(self)
         self.bootstrapping = False
         self.__thread_ident = current_thread().ident
@@ -96,6 +97,7 @@ class Postgresql(object):
         self.set_role(self.get_postgres_role_from_data_directory())
         self._state_entry_timestamp = None
 
+        # 用于保存从DCS中获取的集群状态信息，每次主循环都会先重置为{}，然后再从DCS获取最新保存的信息
         self._cluster_info_state = {}
         self._cached_replica_timeline = None
 
@@ -153,6 +155,7 @@ class Postgresql(object):
                 logger.exception('Failed to read PG_VERSION from %s', self._data_dir)
         return 0
 
+    # 获得命令的绝对路径
     def pgcommand(self, cmd):
         """Returns path to the specified PostgreSQL command"""
         return os.path.join(self._bin_dir, cmd)
@@ -165,6 +168,8 @@ class Postgresql(object):
         pg_ctl = [self.pgcommand('pg_ctl'), cmd]
         return subprocess.call(pg_ctl + ['-D', self._data_dir] + list(args), **kwargs) == 0
 
+    # 运行 pg_isready 以查看 PostgreSQL 是否正在接受连接。
+    # ：返回：如果 PostgreSQL 已启动，则返回“ok”，如果正在启动，则返回“reject”，如果未启动，则返回“no_resopnse”。
     def pg_isready(self):
         """Runs pg_isready to see if PostgreSQL is accepting connections.
 
@@ -255,6 +260,7 @@ class Postgresql(object):
         except RetryFailedError as e:
             raise PostgresConnectionException(str(e))
 
+    # 数据库数据目录不存在 或者 目录下没有任何东西 则返回真
     def data_directory_empty(self):
         return not os.path.exists(self._data_dir) or os.listdir(self._data_dir) == []
 
@@ -285,7 +291,7 @@ class Postgresql(object):
             replica_methods = self.create_replica_methods
         return any(self.replica_method_can_work_without_replication_connection(m) for m in replica_methods)
 
-    # 重置集群的状态信息
+    # 重置集群的状态信息 -- > 仅有两个信息 timeline wal_position
     def reset_cluster_info_state(self):
         self._cluster_info_state = {}
 
@@ -355,6 +361,13 @@ class Postgresql(object):
         with self._state_lock:
             return self._state
 
+    # 可能的取值为：
+    # 'uninitialized' --> 数据库数据目录不存在 或者 目录下没有任何东西
+    # 'startting' --> 启动数据库前设置， 'start failed' 'running' 是这个状态后的后续状态
+    # 'start failed' 
+    # 'running'
+    # 'stopped' --> 停库后的两个状态
+    # 'stop failed'
     def set_state(self, value):
         with self._state_lock:
             self._state = value
@@ -386,6 +399,7 @@ class Postgresql(object):
         logger.warning("Timed out waiting for PostgreSQL to start")
         return False
 
+    # 启动数据库，开始时候先设置数据库状态为 'startting' 启动后持续等待状态改变为其他状态才返回（可能是启动成功也可能是启动失败）
     def start(self, timeout=None, task=None, block_callbacks=False, role=None):
         """Start PostgreSQL
 
@@ -429,6 +443,7 @@ class Postgresql(object):
                 logger.info("PostgreSQL start cancelled.")
                 return False
 
+            # 启动数据库
             self._postmaster_proc = PostmasterProcess.start(self.pgcommand('postgres'),
                                                             self._data_dir,
                                                             self.config.postgresql_conf,
@@ -448,6 +463,7 @@ class Postgresql(object):
         if not self._postmaster_proc or not self.wait_for_port_open(self._postmaster_proc, start_timeout):
             return False
 
+        # 等待数据库进程的状态有 'startting' 改变为其他状态
         ret = self.wait_for_startup(start_timeout)
         if ret is not None:
             return ret
@@ -473,6 +489,7 @@ class Postgresql(object):
             logger.exception('Exception during CHECKPOINT')
             return 'not accessible or not healty'
 
+    # 停止数据库，数据库状态只有两个结果 'stopped' 'stop failed'
     def stop(self, mode='fast', block_callbacks=False, checkpoint=None, on_safepoint=None):
         """Stop PostgreSQL
 
@@ -555,6 +572,11 @@ class Postgresql(object):
         """Checks PostgreSQL status and returns if PostgreSQL is in the middle of startup."""
         return self.is_starting() and not self.check_startup_state_changed()
 
+    # 检查 PostgreSQL 是否已完成启动、失败或仍在启动。
+    # 仅应在 state == 'starting' 时调用 -- 正在启动中
+    # :returns: 如果状态从 'starting' 更改，则返回 True
+    # 
+    # 当前是starting状态时候调用，用于检查数据库状态是否从starting改变成其他状态
     def check_startup_state_changed(self):
         """Checks if PostgreSQL has completed starting up or failed or still starting.
 
@@ -567,8 +589,11 @@ class Postgresql(object):
         if ready == STATE_REJECT:
             return False
         elif ready == STATE_NO_RESPONSE:
+            # pg_isready命令得到结果是 no response, 此时数据库进程可能是存在的仅仅是没有反应
             self.set_state('start failed')
+            # 启动失败的情况下不需要加载复制槽（load_replication_slots()）
             self.slots_handler.schedule(False)  # TODO: can remove this?
+            # 备份配置文件，备份时校验数据库是否处于bootstrap状态
             self.config.save_configuration_files(True)  # TODO: maybe remove this?
             return True
         else:
@@ -594,6 +619,7 @@ class Postgresql(object):
         :returns: True if start was successful, False otherwise"""
         if not self.is_starting():
             # Should not happen
+            # 不应该发生的事情，当前不是startting状态时候确调用了这个函数
             logger.warning("wait_for_startup() called when not in starting state")
 
         while not self.check_startup_state_changed():
@@ -601,6 +627,7 @@ class Postgresql(object):
                 return None
             time.sleep(1)
 
+        # 只要状态从startting改变成其他值 -- check_startup_state_changed函数返回真，新设置的状态为running时候返回真
         return self.state == 'running'
 
     def restart(self, timeout=None, task=None, block_callbacks=False, role=None):
