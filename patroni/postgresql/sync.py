@@ -202,6 +202,8 @@ class _ReplicaList(List[_Replica]):
 
         # We want to prioritize candidates based on `write_lsn``, ``flush_lsn``, or ``replay_lsn``.
         # Which column exactly to pick depends on the values of ``synchronous_commit`` GUC.
+        # 我们希望根据 'write_lsn'、 'flush_lsn' 或 'replay_lsn' 对候选者进行优先排序。具体选择哪一列取决于 'synchronous_commit' GUC 的值。
+        # 当前有三种情况： 'replay_lsn' 'write_lsn' 'flush_lsn'
         sort_col = {
             'remote_apply': 'replay',
             'remote_write': 'write'
@@ -209,6 +211,7 @@ class _ReplicaList(List[_Replica]):
 
         members = CaseInsensitiveDict({m.name: m for m in cluster.members})
         for row in postgresql.pg_stat_replication():
+            # 我们可以在这里看到，application_name需要和yml配置文件中的节点名一样！！！
             member = members.get(row['application_name'])
 
             # We want to consider only rows from ``pg_stat_replication` that:
@@ -255,6 +258,13 @@ class SyncHandler(object):
         If "synchronous_standby_names" was changed, we need to check that newly added replicas have
         reached `self._primary_flush_lsn`. Only after that they could be counted as synchronous.
         """
+
+        """处理 "synchronous_standby_names" GUC 的更改。
+
+        如果 "synchronous_standby_names" 已更改，我们需要检查新添加的副本是否已
+        达到 `self._primary_flush_lsn`。只有在此之后，它们才能算作同步。
+        """
+
         synchronous_standby_names = self._postgresql.synchronous_standby_names()
         if synchronous_standby_names == self._synchronous_standby_names:
             return
@@ -312,6 +322,20 @@ END;$$""")
 
         :returns: tuple of candidates :class:`CaseInsensitiveSet` and synchronous standbys :class:`CaseInsensitiveSet`.
         """
+
+        """找到最佳候选者作为同步备用节点。
+
+        当前同步备用节点始终是首选，除非它已断开连接或不想再作为同步备用节点。
+
+        根据全局配置中的值选择备用节点（这里应该指的是同步备）：
+        - `maximum_lag_on_syncnode`：如果同步副本停止响应（或挂起），则有助于交换不健康的同步副本。
+            请将值设置得足够高，以免在高负载期间不必要地交换同步备用节点。任何小于或等于 0 的值都会使行为保持向后兼容。
+            请注意，如果所有副本都挂起，它也不会交换同步备用节点。
+        - `synchronous_node_count`：控制应将多少个节点设置为同步节点。
+
+        :returns: 候选节点 :class:`CaseInsensitiveSet` 和同步备用节点 :class:`CaseInsensitiveSet` 的元组。
+        """
+
         self._handle_synchronous_standby_names_change()
 
         replica_list = _ReplicaList(self._postgresql, cluster)
