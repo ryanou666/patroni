@@ -42,6 +42,13 @@ class _SSN(NamedTuple):
     :ivar num: how many nodes are required to be synchronous
     :ivar members: collection of standby names listed in "synchronous_standby_names"
     """
+    """"
+    _SSN 类用于表示 PostgreSQL 数据库配置中的 synchronous_standby_names 参数解析后的值
+    :ivar sync_type: 可能的值有 'off'、'priority' 或 'quorum'
+    :ivar has_star: 如果 synchronous_standby_names 参数中包含 '*'，则此字段设置为 True。
+    :ivar num: 一个整数，表示需要多少个节点同步。
+    :ivar members: 存储在 synchronous_standby_names 参数中列出的备用节点名称，集合。
+    """
     sync_type: str
     has_star: bool
     num: int
@@ -227,9 +234,16 @@ class SyncHandler(object):
     and the `current_state()` method will count newly added names as "sync" only when
     they reached memorized LSN and also reported as "sync" by `pg_stat_replication`"""
 
+    """负责管理参数 `synchronous_standby_names` 的类。
+
+    根据 `pg_stat_replication` 中的状态选择同步备。
+    当 `synchronous_standby_names` 发生更改时，我们会记住 `_primary_flush_lsn`
+    并且 `current_state()` 方法仅在新添加的节点名称 达到这个记住的LSN 并且 这个节点由 `pg_stat_replication` 报告为"sync"时才将其计为"sync" 
+    """
+
     def __init__(self, postgresql: 'Postgresql') -> None:
         self._postgresql = postgresql
-        self._synchronous_standby_names = ''  # last known value of synchronous_standby_names
+        self._synchronous_standby_names = ''  # last known value of synchronous_standby_names 最新最近知道的synchronous_standby_names参数内容默认''
         self._ssn_data = deepcopy(_EMPTY_SSN)
         self._primary_flush_lsn = 0
         # "sync" replication connections, that were verified to reach self._primary_flush_lsn at some point
