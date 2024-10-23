@@ -6,6 +6,7 @@ from collections import OrderedDict
 from typing import Any, Collection, Dict, Iterator, MutableMapping, MutableSet, Optional
 
 
+# 忽略大小写的集合
 class CaseInsensitiveSet(MutableSet[str]):
     """A case-insensitive :class:`set`-like object.
 

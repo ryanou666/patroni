@@ -469,6 +469,7 @@ class Postgresql(object):
                 self._has_permanent_logical_slots
                 or cluster.should_enforce_hot_standby_feedback(self.name, nofailover, self.major_version))
 
+    # 从数据库中通过执行sql获取信息
     def _cluster_info_state_get(self, name: str) -> Optional[Any]:
         if not self._cluster_info_state:
             try:
@@ -1242,6 +1243,7 @@ class Postgresql(object):
         except psycopg.Error:
             return None
 
+    # 当前是主库返回的是写入lsn位置，否则返回的是接收（考虑的是备）或者回放(应该考虑的是主降备后？)的最大位置
     def last_operation(self) -> int:
         return self._wal_position(self.is_leader(), self._cluster_info_state_get('wal_position') or 0,
                                   self.received_location(), self.replayed_location())

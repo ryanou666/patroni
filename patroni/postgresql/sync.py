@@ -15,17 +15,17 @@ logger = logging.getLogger(__name__)
 
 SYNC_STANDBY_NAME_RE = re.compile(r'^[A-Za-z_][A-Za-z_0-9\$]*$')
 SYNC_REP_PARSER_RE = re.compile(r"""
-           (?P<first> [fF][iI][rR][sS][tT] )
-         | (?P<any> [aA][nN][yY] )
-         | (?P<space> \s+ )
-         | (?P<ident> [A-Za-z_][A-Za-z_0-9\$]* )
-         | (?P<dquot> " (?: [^"]+ | "" )* " )
-         | (?P<star> [*] )
-         | (?P<num> \d+ )
-         | (?P<comma> , )
-         | (?P<parenstart> \( )
-         | (?P<parenend> \) )
-         | (?P<JUNK> . )
+           (?P<first> [fF][iI][rR][sS][tT] )    # 忽略大小写匹配fist
+         | (?P<any> [aA][nN][yY] )      # 忽略大小写匹配any
+         | (?P<space> \s+ )     # 空白字符
+         | (?P<ident> [A-Za-z_][A-Za-z_0-9\$]* )    # 以大小写字母或下划线开头，后面跟着大小写字母、下划线、数字、$ 的标识符
+         | (?P<dquot> " (?: [^"]+ | "" )* " )   # 匹配双引号内的字符串，包含的双引号用双引号转义
+         | (?P<star> [*] )      # 匹配*
+         | (?P<num> \d+ )       # 匹配数字
+         | (?P<comma> , )       # 匹配逗号
+         | (?P<parenstart> \( ) # 匹配左圆括号
+         | (?P<parenend> \) )   # 匹配右圆括号
+         | (?P<JUNK> . )        # 匹配任意字符
         """, re.X)
 
 
@@ -49,10 +49,10 @@ class _SSN(NamedTuple):
     :ivar num: 一个整数，表示需要多少个节点同步。
     :ivar members: 存储在 synchronous_standby_names 参数中列出的备用节点名称，集合。
     """
-    sync_type: str
-    has_star: bool
-    num: int
-    members: CaseInsensitiveSet
+    sync_type: str # 同步的类型(quorum 或者 priority)
+    has_star: bool # 节点名中是否配置有*
+    num: int    # 同步备个数
+    members: CaseInsensitiveSet # 所有配置的同步备名集合（忽略大小写）
 
 
 _EMPTY_SSN = _SSN('off', False, 0, CaseInsensitiveSet())
@@ -60,7 +60,8 @@ _EMPTY_SSN = _SSN('off', False, 0, CaseInsensitiveSet())
 
 def parse_sync_standby_names(value: str) -> _SSN:
     """Parse postgresql synchronous_standby_names to constituent parts.
-
+        将 postgresql synchronous_standby_names 解析为组成部分。
+    
     :param value: the value of `synchronous_standby_names`
     :returns: :class:`_SSN` object
     :raises `ValueError`: if the configuration value can not be parsed
@@ -114,6 +115,7 @@ def parse_sync_standby_names(value: str) -> _SSN:
         ...
     ValueError: Unparseable synchronous_standby_names value
     """
+    # 返回三元组列表 (匹配的组名, 匹配的内容, token的开始位置)，空白会忽略
     tokens = [(m.lastgroup, m.group(0), m.start())
               for m in SYNC_REP_PARSER_RE.finditer(value)
               if m.lastgroup != 'space']
@@ -121,24 +123,29 @@ def parse_sync_standby_names(value: str) -> _SSN:
         return deepcopy(_EMPTY_SSN)
 
     if [t[0] for t in tokens[0:3]] == ['any', 'num', 'parenstart'] and tokens[-1][0] == 'parenend':
-        sync_type = 'quorum'
-        num = int(tokens[1][1])
-        synclist = tokens[3:-1]
+        # 前三个元组是 any 数字 左圆括号，最后一个元组是右圆括号
+        sync_type = 'quorum' # 同步方式为 法定人数
+        num = int(tokens[1][1]) # 法定人数的个数
+        synclist = tokens[3:-1] # 法定人数的名字
     elif [t[0] for t in tokens[0:3]] == ['first', 'num', 'parenstart'] and tokens[-1][0] == 'parenend':
-        sync_type = 'priority'
-        num = int(tokens[1][1])
-        synclist = tokens[3:-1]
+        # 前三个元组是 first 数字 左圆括号，最后一个元组是右圆括号
+        sync_type = 'priority'  # 同步方式为优先级方式
+        num = int(tokens[1][1]) # 同步个数
+        synclist = tokens[3:-1] # 同步的名字
     elif [t[0] for t in tokens[0:2]] == ['num', 'parenstart'] and tokens[-1][0] == 'parenend':
+        # 前两个元组是 数字 左圆括号，最后一个元组是右圆括号
         sync_type = 'priority'
         num = int(tokens[0][1])
         synclist = tokens[2:-1]
     else:
+        # 直接是逗号分隔的同步备列表，就是优先级方式，且同步备个数是1，其他都是潜在同步备
         sync_type = 'priority'
         num = 1
         synclist = tokens
 
     has_star = False
     members = CaseInsensitiveSet()
+    # enumerate 是 Python 中的一个内置函数，它用于将一个可迭代对象（如列表、元组、字符串等）组合为一个索引序列，同时列出数据和数据下标。
     for i, (a_type, a_value, a_pos) in enumerate(synclist):
         if i % 2 == 1:  # odd elements are supposed to be commas
             if len(synclist) == i + 1:  # except the last token
@@ -148,15 +155,19 @@ def parse_sync_standby_names(value: str) -> _SSN:
                 raise ValueError("Unparseable synchronous_standby_names value %r: ""Got token %s %r while"
                                  " expecting comma at %d" % (value, a_type, a_value, a_pos))
         elif a_type in {'ident', 'first', 'any'}:
+            # 一个节点名字符合标识符规则或者是关键字fist or any
             members.add(a_value)
         elif a_type == 'star':
+            # 节点名字中有*
             members.add(a_value)
             has_star = True
         elif a_type == 'dquot':
+            # 匹配双引号里面保存的名字，双引号中间两个引号修改成一个 -- 外面这一层双引号直接去掉
             members.add(a_value[1:-1].replace('""', '"'))
         else:
             raise ValueError("Unparseable synchronous_standby_names value %r: Unexpected token %s %r at %d" %
                              (value, a_type, a_value, a_pos))
+    # 返回的是 同步的类型(quorum 或者 priority) 节点名中是否配置有* 同步备个数 所有配置的同步备名集合
     return _SSN(sync_type, has_star, num, members)
 
 
@@ -258,6 +269,8 @@ class SyncHandler(object):
         # "sync" replication connections, that were verified to reach self._primary_flush_lsn at some point
         self._ready_replicas = CaseInsensitiveDict({})  # keys: member names, values: connection pids
 
+    # 此函数实际上只有主库或者主节点才会调用到
+    # 缓存新的 synchronous_standby_names 信息
     def _handle_synchronous_standby_names_change(self) -> None:
         """Handles changes of "synchronous_standby_names" GUC.
 
@@ -271,23 +284,32 @@ class SyncHandler(object):
         达到 `self._primary_flush_lsn`。只有在此之后，它们才能算作同步。
         """
 
+        # 执行sql（或者从上一次执行结果中）获取配置信息
         synchronous_standby_names = self._postgresql.synchronous_standby_names()
         if synchronous_standby_names == self._synchronous_standby_names:
+            # 参数没有改变直接返回
             return
 
+        # 参数改变了，缓存下来，用于下次判断参数改变的依据
         self._synchronous_standby_names = synchronous_standby_names
         try:
+            # 同步的类型(quorum 或者 priority) 节点名中是否配置有* 同步备个数 所有配置的同步备名集合
             self._ssn_data = parse_sync_standby_names(synchronous_standby_names)
         except ValueError as e:
             logger.warning('%s', e)
+            # 解析错了先当于这个参数什么都不配置
             self._ssn_data = deepcopy(_EMPTY_SSN)
 
         # Invalidate cache of "sync" connections
         for app_name in list(self._ready_replicas.keys()):
             if app_name not in self._ssn_data.members:
+                # 如果当前缓存的sync连接的节点不在新获取的同步节点中，则直接删除这个节点
                 del self._ready_replicas[app_name]
 
         # Newly connected replicas will be counted as sync only when reached self._primary_flush_lsn
+        # 新连接的副本只有在达到 self._primary_flush_lsn 时才会被视为同步
+        # 当前是主库返回的是写入lsn位置，否则返回的是接收（考虑的是备）或者回放(应该考虑的是主降备后？)的最大位置
+        #   能调用进来的都是主库或者主节点，因此这里不需要考虑备库的方式
         self._primary_flush_lsn = self._postgresql.last_operation()
         # Ensure some WAL traffic to move replication
         self._postgresql.query("""DO $$
@@ -295,6 +317,7 @@ BEGIN
     SET local synchronous_commit = 'off';
     PERFORM * FROM pg_catalog.txid_current();
 END;$$""")
+        # 重置状态，以便下次获取集群信息能够重新往主库执行sql获取
         self._postgresql.reset_cluster_info_state(None)  # Reset internal cache to query fresh values
 
     def _process_replica_readiness(self, cluster: Cluster, replica_list: _ReplicaList) -> None:
@@ -312,6 +335,7 @@ END;$$""")
                          or replica.sync_state == 'sync' and replica.lsn >= self._primary_flush_lsn):
                 self._ready_replicas[replica.application_name] = replica.pid
 
+    # 只有主库才会调用，用于挑选最优的候选节点（用于同步备）
     def current_state(self, cluster: Cluster) -> Tuple[CaseInsensitiveSet, CaseInsensitiveSet]:
         """Find the best candidates to be the synchronous standbys.
 
@@ -342,6 +366,7 @@ END;$$""")
         :returns: 候选节点 :class:`CaseInsensitiveSet` 和同步备用节点 :class:`CaseInsensitiveSet` 的元组。
         """
 
+        # 缓存新的 synchronous_standby_names 信息
         self._handle_synchronous_standby_names_change()
 
         replica_list = _ReplicaList(self._postgresql, cluster)
@@ -366,6 +391,7 @@ END;$$""")
 
         return candidates, sync_nodes
 
+    # 只有当前是主节点才会执行
     def set_synchronous_standby_names(self, sync: Collection[str]) -> None:
         """Constructs and sets "synchronous_standby_names" GUC value.
 
