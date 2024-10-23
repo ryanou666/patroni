@@ -224,6 +224,33 @@ class Postgresql(object):
         else:
             extra = "0, NULL, NULL, NULL, NULL, NULL, NULL" + extra
 
+        #实测vastbase是(最后没有from也能执行)：
+        # SELECT 
+        #   CASE WHEN pg_catalog.pg_is_in_recovery() THEN 0 
+        #       ELSE ('x' || pg_catalog.substr(pg_catalog.pg_xlogfile_name(pg_catalog.pg_current_xlog_location()), 1, 8))::bit(32)::int END,  # primary timeline 获得十进制的整数
+        #   CASE WHEN pg_catalog.pg_is_in_recovery() THEN 0 
+        #       ELSE pg_catalog.pg_xlog_location_diff(pg_catalog.pg_current_xlog_location(), '0/0')::bigint END, "  # write_lsn pg_xlog_location_diff 函数的使用只是为了方便十进制显示
+        #   pg_catalog.pg_xlog_location_diff(pg_catalog.pg_last_xlog_replay_location(), '0/0')::bigint, # wal回放日志
+        #   pg_catalog.pg_xlog_location_diff(COALESCE(pg_catalog.pg_last_xlog_receive_location(), '0/0'), '0/0')::bigint, # wal接收位置 -- 主库没有，备库才有
+        #   pg_catalog.pg_is_in_recovery() AND pg_catalog.pg_is_xlog_replay_paused(), # 备库是否暂停了recovery
+        #   0, NULL, NULL, NULL, NULL, NULL, NULL,
+        #   pg_catalog.current_setting('synchronous_commit'),
+        #   pg_catalog.current_setting('synchronous_standby_names'),
+        #   (
+        #       SELECT pg_catalog.json_agg(r.*) FROM 
+        #           (
+        #               SELECT 
+        #                   pid,
+        #                   (SELECT pg_catalog.substr(application_name, pg_catalog.strpos(application_name, '[') + 1, pg_catalog.strpos(application_name, ']') -1) FROM pg_catalog.pg_stat_get_activity(pid)) AS application_name,  # vastbase中显示格式有变，因此需要调整
+        #                   sync_state, # 如 Sync Potential
+        #                   pg_catalog.pg_xlog_location_diff(receiver_write_location, '0/0')::bigint AS write_lsn,   # 备库写入位置，vastbase中显示格式有变，因此需要调整
+        #                   pg_catalog.pg_xlog_location_diff(receiver_flush_location, '0/0')::bigint AS flush_lsn,   # 备库刷入位置，vastbase中显示格式有变，因此需要调整
+        #                   pg_catalog.pg_xlog_location_diff(receiver_replay_location, '0/0')::bigint AS replay_lsn  # 备库回放位置，vastbase中显示格式有变，因此需要调整
+        #               FROM 
+        #                   pg_catalog.pg_stat_get_wal_senders()    # 只有主库才有条目
+        #               WHERE w.state = 'streaming'
+        #           ) r
+        #   )
         return ("SELECT " + self.TL_LSN + ", {2}").format(self.wal_name, self.lsn_name, extra)
 
     @property

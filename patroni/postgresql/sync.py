@@ -209,21 +209,27 @@ class _ReplicaList(List[_Replica]):
             'remote_write': 'write'
         }.get(postgresql.synchronous_commit(), 'flush') + '_lsn'
 
+        # 这个是 patroni 启动时候执行的yml文件中的name字段
         members = CaseInsensitiveDict({m.name: m for m in cluster.members})
         for row in postgresql.pg_stat_replication():
             # 我们可以在这里看到，application_name需要和yml配置文件中的节点名一样！！！
             member = members.get(row['application_name'])
 
             # We want to consider only rows from ``pg_stat_replication` that:
+            # 我们仅考虑 pg_stat_replication 中满足以下条件的行：
             # 1. are known to be streaming (write/flush/replay LSN are not NULL).
+            #   这些备库的 write/flush/replay LSN 不能为空
             # 2. can be mapped to a ``Member`` of the ``Cluster``:
             #   a. ``Member`` doesn't have ``nosync`` tag set;
+            #       这个成员没有 nosync 标签
             #   b. PostgreSQL on the member is known to be running and accepting client connections.
+            #       这个成员数据库需要正在运行且可以接收客户端连接
             if member and row[sort_col] is not None and member.is_running and not member.tags.get('nosync', False):
                 self.append(_Replica(row['pid'], row['application_name'],
                                      row['sync_state'], row[sort_col], bool(member.nofailover)))
 
         # Prefer replicas that are in state ``sync`` and with higher values of ``write``/``flush``/``replay`` LSN.
+        # 将会优先选取备库：首先是 sync 状态的备库，其次是 lsn更新的备库
         self.sort(key=lambda r: (r.sync_state, r.lsn), reverse=True)
 
         self.max_lsn = max(self, key=lambda x: x.lsn).lsn if len(self) > 1 else postgresql.last_operation()
